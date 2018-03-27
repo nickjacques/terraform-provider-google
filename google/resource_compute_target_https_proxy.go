@@ -5,6 +5,7 @@ import (
 	"log"
 	"strconv"
 
+	"github.com/hashicorp/errwrap"
 	"github.com/hashicorp/terraform/helper/schema"
 	"google.golang.org/api/compute/v1"
 )
@@ -43,6 +44,12 @@ func resourceComputeTargetHttpsProxy() *schema.Resource {
 			"url_map": &schema.Schema{
 				Type:             schema.TypeString,
 				Required:         true,
+				DiffSuppressFunc: compareSelfLinkRelativePaths,
+			},
+
+			"ssl_policy": &schema.Schema{
+				Type:             schema.TypeString,
+				Optional:         true,
 				DiffSuppressFunc: compareSelfLinkRelativePaths,
 			},
 
@@ -109,6 +116,21 @@ func resourceComputeTargetHttpsProxyCreate(d *schema.ResourceData, meta interfac
 
 	d.SetId(proxy.Name)
 
+	if v, ok := d.GetOk("ssl_policy"); ok {
+		pol, err := ParseSslPolicyFieldValue(v.(string), d, config)
+		op, err := config.clientCompute.TargetHttpsProxies.SetSslPolicy(
+			project, proxy.Name, &compute.SslPolicyReference{
+				SslPolicy: pol.RelativeLink(),
+			}).Do()
+		if err != nil {
+			return errwrap.Wrapf("Error setting Target HTTPS Proxy SSL Policy: {{err}}", err)
+		}
+		waitErr := computeSharedOperationWait(config.clientCompute, op, project, "Adding Target HTTPS Proxy SSL Policy")
+		if waitErr != nil {
+			return waitErr
+		}
+	}
+
 	return resourceComputeTargetHttpsProxyRead(d, meta)
 }
 
@@ -161,6 +183,24 @@ func resourceComputeTargetHttpsProxyUpdate(d *schema.ResourceData, meta interfac
 		d.SetPartial("ssl_certificate")
 	}
 
+	if d.HasChange("ssl_policy") {
+		pol, err := ParseSslPolicyFieldValue(d.Get("ssl_policy").(string), d, config)
+		if err != nil {
+			return err
+		}
+		op, err := config.clientCompute.TargetHttpsProxies.SetSslPolicy(
+			project, d.Id(), &compute.SslPolicyReference{
+				SslPolicy: pol.RelativeLink(),
+			}).Do()
+		if err != nil {
+			return err
+		}
+		waitErr := computeSharedOperationWait(config.clientCompute, op, project, "Updating Target HTTPS Proxy SSL Policy")
+		if waitErr != nil {
+			return waitErr
+		}
+	}
+
 	d.Partial(false)
 
 	return resourceComputeTargetHttpsProxyRead(d, meta)
@@ -187,6 +227,7 @@ func resourceComputeTargetHttpsProxyRead(d *schema.ResourceData, meta interface{
 	d.Set("url_map", proxy.UrlMap)
 	d.Set("name", proxy.Name)
 	d.Set("project", project)
+	d.Set("ssl_policy", proxy.SslPolicy)
 
 	return nil
 }

@@ -66,6 +66,10 @@ func ParseSecurityPolicyFieldValue(securityPolicy string, d TerraformResourceDat
 	return parseGlobalFieldValue("securityPolicies", securityPolicy, "project", d, config, true)
 }
 
+func ParseSslPolicyFieldValue(sslPolicy string, d TerraformResourceData, config *Config) (*GlobalFieldValue, error) {
+	return parseGlobalFieldValue("sslPolicies", sslPolicy, "project", d, config, true)
+}
+
 // ------------------------------------------------------------
 // Base helpers used to create helpers for specific fields.
 // ------------------------------------------------------------

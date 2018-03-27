@@ -2,6 +2,7 @@ package google
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform/helper/acctest"
@@ -74,6 +75,37 @@ func TestAccComputeTargetHttpsProxy_update(t *testing.T) {
 	})
 }
 
+func TestAccComputeTargetHttpsProxy_basicWithSslPolicy(t *testing.T) {
+	t.Parallel()
+
+	var proxy compute.TargetHttpsProxy
+
+	resourceSuffix := acctest.RandString(10)
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:     func() { testAccPreCheck(t) },
+		Providers:    testAccProviders,
+		CheckDestroy: testAccCheckComputeTargetHttpsProxyDestroy,
+		Steps: []resource.TestStep{
+			resource.TestStep{
+				Config: testAccComputeTargetHttpsProxy_basicWithSslPolicy(resourceSuffix),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckComputeTargetHttpsProxyExists(
+						"google_compute_target_https_proxy.foobar", &proxy),
+					testAccComputeTargetHttpsProxyDescription("Resource created for Terraform acceptance testing", &proxy),
+					testAccComputeTargetHttpsProxyHasSslCertificate("httpsproxy-test-cert1-"+resourceSuffix, &proxy),
+					testAccComputeTargetHttpsProxyHasSslPolicy("sslpolicy-test-"+resourceSuffix, &proxy),
+				),
+			},
+			resource.TestStep{
+				ResourceName:      "google_compute_target_https_proxy.foobar",
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+		},
+	})
+}
+
 func testAccCheckComputeTargetHttpsProxyDestroy(s *terraform.State) error {
 	config := testAccProvider.Meta().(*Config)
 
@@ -125,6 +157,15 @@ func testAccComputeTargetHttpsProxyDescription(description string, proxy *comput
 	return func(s *terraform.State) error {
 		if proxy.Description != description {
 			return fmt.Errorf("Wrong description: expected '%s' got '%s'", description, proxy.Description)
+		}
+		return nil
+	}
+}
+
+func testAccComputeTargetHttpsProxyHasSslPolicy(policyName string, proxy *compute.TargetHttpsProxy) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		if strings.Contains(proxy.SslPolicy, policyName) {
+			return fmt.Errorf("Wrong description: expected '%s' got '%s'", policyName, proxy.SslPolicy)
 		}
 		return nil
 	}
@@ -202,6 +243,72 @@ resource "google_compute_ssl_certificate" "foobar2" {
 	certificate = "${file("test-fixtures/ssl_cert/test.crt")}"
 }
 `, id, id, id, id, id, id)
+}
+
+func testAccComputeTargetHttpsProxy_basicWithSslPolicy(id string) string {
+	return fmt.Sprintf(`
+resource "google_compute_target_https_proxy" "foobar" {
+	description = "Resource created for Terraform acceptance testing"
+	name = "httpsproxy-test-%s"
+	url_map = "${google_compute_url_map.foobar.self_link}"
+	ssl_certificates = ["${google_compute_ssl_certificate.foobar1.self_link}"]
+}
+
+resource "google_compute_backend_service" "foobar" {
+	name = "httpsproxy-test-backend-%s"
+	health_checks = ["${google_compute_http_health_check.zero.self_link}"]
+}
+
+resource "google_compute_http_health_check" "zero" {
+	name = "httpsproxy-test-health-check-%s"
+	request_path = "/"
+	check_interval_sec = 1
+	timeout_sec = 1
+}
+
+resource "google_compute_url_map" "foobar" {
+	name = "httpsproxy-test-url-map-%s"
+	default_service = "${google_compute_backend_service.foobar.self_link}"
+	host_rule {
+		hosts = ["mysite.com", "myothersite.com"]
+		path_matcher = "boop"
+	}
+	path_matcher {
+		default_service = "${google_compute_backend_service.foobar.self_link}"
+		name = "boop"
+		path_rule {
+			paths = ["/*"]
+			service = "${google_compute_backend_service.foobar.self_link}"
+		}
+	}
+	test {
+		host = "mysite.com"
+		path = "/*"
+		service = "${google_compute_backend_service.foobar.self_link}"
+	}
+}
+
+resource "google_compute_ssl_certificate" "foobar1" {
+	name = "httpsproxy-test-cert1-%s"
+	description = "very descriptive"
+	private_key = "${file("test-fixtures/ssl_cert/test.key")}"
+	certificate = "${file("test-fixtures/ssl_cert/test.crt")}"
+}
+
+resource "google_compute_ssl_certificate" "foobar2" {
+	name = "httpsproxy-test-cert2-%s"
+	description = "very descriptive"
+	private_key = "${file("test-fixtures/ssl_cert/test.key")}"
+	certificate = "${file("test-fixtures/ssl_cert/test.crt")}"
+}
+
+resource "google_compute_ssl_policy" "foobar" {
+	name = "sslpolicy-test-%s"
+	description = "Resource created for Terraform acceptance testing"
+	min_tls_version = "TLS_1_2"
+	profile = "MODERN"
+}
+`, id, id, id, id, id, id, id)
 }
 
 func testAccComputeTargetHttpsProxy_basic2(id string) string {
