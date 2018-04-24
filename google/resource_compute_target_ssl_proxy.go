@@ -54,6 +54,12 @@ func resourceComputeTargetSslProxy() *schema.Resource {
 				Default:  "NONE",
 			},
 
+			"ssl_policy": &schema.Schema{
+				Type:             schema.TypeString,
+				Optional:         true,
+				DiffSuppressFunc: compareSelfLinkRelativePaths,
+			},
+
 			"project": &schema.Schema{
 				Type:     schema.TypeString,
 				Optional: true,
@@ -108,6 +114,21 @@ func resourceComputeTargetSslProxyCreate(d *schema.ResourceData, meta interface{
 	}
 
 	d.SetId(proxy.Name)
+
+	if v, ok := d.GetOk("ssl_policy"); ok {
+		pol, err := ParseSslPolicyFieldValue(v.(string), d, config)
+		op, err := config.clientCompute.TargetSslProxies.SetSslPolicy(
+			project, proxy.Name, &compute.SslPolicyReference{
+				SslPolicy: pol.RelativeLink(),
+			}).Do()
+		if err != nil {
+			return errwrap.Wrapf("Error setting SSL Policy: {{err}}", err)
+		}
+		waitErr := computeSharedOperationWait(config.clientCompute, op, project, "Adding Target SSL Proxy SSL Policy")
+		if waitErr != nil {
+			return waitErr
+		}
+	}
 
 	return resourceComputeTargetSslProxyRead(d, meta)
 }
@@ -180,6 +201,24 @@ func resourceComputeTargetSslProxyUpdate(d *schema.ResourceData, meta interface{
 		d.SetPartial("ssl_certificates")
 	}
 
+	if d.HasChange("ssl_policy") {
+		pol, err := ParseSslPolicyFieldValue(d.Get("ssl_policy").(string), d, config)
+		if err != nil {
+			return err
+		}
+		op, err := config.clientCompute.TargetSslProxies.SetSslPolicy(
+			project, d.Id(), &compute.SslPolicyReference{
+				SslPolicy: pol.RelativeLink(),
+			}).Do()
+		if err != nil {
+			return err
+		}
+		waitErr := computeSharedOperationWait(config.clientCompute, op, project, "Updating Target SSL Proxy SSL Policy")
+		if waitErr != nil {
+			return waitErr
+		}
+	}
+
 	d.Partial(false)
 
 	return resourceComputeTargetSslProxyRead(d, meta)
@@ -204,6 +243,7 @@ func resourceComputeTargetSslProxyRead(d *schema.ResourceData, meta interface{})
 	d.Set("proxy_header", proxy.ProxyHeader)
 	d.Set("backend_service", proxy.Service)
 	d.Set("ssl_certificates", proxy.SslCertificates)
+	d.Set("ssl_policy", proxy.SslPolicy)
 	d.Set("project", project)
 	d.Set("self_link", proxy.SelfLink)
 	d.Set("proxy_id", strconv.FormatUint(proxy.Id, 10))
